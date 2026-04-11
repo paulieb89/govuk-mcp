@@ -14,14 +14,46 @@ MCP server for GOV.UK — search, content retrieval, organisation lookup, and po
 
 All data is sourced from official public GOV.UK APIs and postcodes.io. No API keys required.
 
-## Usage (Claude Desktop / claude.ai)
+## Quick start
+
+### Remote (no install)
+
+Point any MCP client at the hosted server:
 
 ```json
 {
   "mcpServers": {
     "govuk": {
+      "type": "http",
       "url": "https://govuk-mcp.fly.dev/mcp"
     }
   }
 }
 ```
+
+### Local (pip install)
+
+```bash
+pip install govuk-mcp
+govuk-mcp
+# MCP endpoint: http://localhost:8000/mcp
+```
+
+### Local (Claude Desktop)
+
+```bash
+fastmcp install claude-desktop govuk-mcp
+```
+
+## APIs used
+
+| API | Base URL | Auth |
+|-----|----------|------|
+| GOV.UK Search | `https://www.gov.uk/api/search.json` | None |
+| GOV.UK Content | `https://www.gov.uk/api/content{path}` | None |
+| GOV.UK Organisations | `https://www.gov.uk/api/organisations` | None |
+| postcodes.io | `https://api.postcodes.io` | None |
+
+## License
+
+MIT

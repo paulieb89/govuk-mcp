@@ -9,12 +9,30 @@ description = "MCP server for GOV.UK — search, content, organisations and post
 readme = "README.md"
 license = { text = "MIT" }
 requires-python = ">=3.11"
-keywords = ["mcp", "govuk", "government", "uk", "fastmcp"]
+keywords = ["mcp", "govuk", "government", "uk", "fastmcp", "model-context-protocol"]
+authors = [
+    { name = "Paul Boucher", email = "paul@bouch.dev" },
+]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Software Development :: Libraries",
+]
 dependencies = [
     "fastmcp>=2.0.0",
     "httpx>=0.27.0",
     "pydantic>=2.0.0",
 ]
+
+[project.urls]
+Homepage = "https://github.com/paulieb89/govuk-mcp"
+Repository = "https://github.com/paulieb89/govuk-mcp"
+Issues = "https://github.com/paulieb89/govuk-mcp/issues"
 
 [project.scripts]
 govuk-mcp = "govuk_mcp.server:main"
