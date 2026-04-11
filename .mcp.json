@@ -1,0 +1,8 @@
+{
+  "mcpServers": {
+    "govuk": {
+      "type": "http",
+      "url": "https://govuk-mcp.fly.dev/mcp"
+    }
+  }
+}

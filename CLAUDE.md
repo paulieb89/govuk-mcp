@@ -52,4 +52,4 @@ Every tool follows the same structure: validate input via Pydantic model -> get 
 
 ## Deployment
 
-Fly.io, London region (lhr), shared-cpu-1x/256MB. Auto-scales to zero when idle. Config in `fly.toml`.
+Fly.io, London region (lhr), shared-cpu-1x/256MB. Always-on (min 1 machine). Config in `fly.toml`.

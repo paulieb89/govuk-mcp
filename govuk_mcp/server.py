@@ -7,7 +7,7 @@ from contextlib import asynccontextmanager
 from typing import Any, Optional
 
 import httpx
-from fastmcp import FastMCP
+from fastmcp import Context, FastMCP
 from pydantic import BaseModel, ConfigDict, Field
 
 # ---------------------------------------------------------------------------
@@ -65,8 +65,8 @@ mcp = FastMCP(
 # Shared helpers
 # ---------------------------------------------------------------------------
 
-def _client(ctx) -> httpx.AsyncClient:
-    return ctx.request_context.lifespan_state["client"]
+def _client(ctx: Context) -> httpx.AsyncClient:
+    return ctx.lifespan_context["client"]
 
 
 def _handle_http_error(e: httpx.HTTPStatusError) -> str:
@@ -204,7 +204,7 @@ class PostcodeInput(BaseModel):
         "openWorldHint": True,
     },
 )
-async def govuk_search(params: SearchInput, ctx) -> str:
+async def govuk_search(params: SearchInput, ctx: Context) -> str:
     """Search GOV.UK's 700k+ content items using the official Search API.
 
     Returns a list of matching content items with title, description, link,
@@ -285,7 +285,7 @@ async def govuk_search(params: SearchInput, ctx) -> str:
         "openWorldHint": True,
     },
 )
-async def govuk_get_content(params: ContentInput, ctx) -> str:
+async def govuk_get_content(params: ContentInput, ctx: Context) -> str:
     """Retrieve the full content item for a GOV.UK page by its base path.
 
     Returns the complete structured content including title, description,
@@ -363,7 +363,7 @@ async def govuk_get_content(params: ContentInput, ctx) -> str:
         "openWorldHint": True,
     },
 )
-async def govuk_get_organisation(params: OrganisationInput, ctx) -> str:
+async def govuk_get_organisation(params: OrganisationInput, ctx: Context) -> str:
     """Retrieve details for a specific UK government organisation by slug.
 
     Returns the organisation's full name, acronym, type (ministerial_department,
@@ -416,7 +416,7 @@ async def govuk_get_organisation(params: OrganisationInput, ctx) -> str:
         "openWorldHint": True,
     },
 )
-async def govuk_list_organisations(params: OrganisationsListInput, ctx) -> str:
+async def govuk_list_organisations(params: OrganisationsListInput, ctx: Context) -> str:
     """List all UK government organisations registered on GOV.UK.
 
     Returns a paginated list of organisations including their slug, acronym,
@@ -467,7 +467,7 @@ async def govuk_list_organisations(params: OrganisationsListInput, ctx) -> str:
         "openWorldHint": True,
     },
 )
-async def govuk_lookup_postcode(params: PostcodeInput, ctx) -> str:
+async def govuk_lookup_postcode(params: PostcodeInput, ctx: Context) -> str:
     """Look up a UK postcode to retrieve its local authority, region, constituency,
     and other administrative geography.
 
@@ -529,7 +529,7 @@ async def govuk_lookup_postcode(params: PostcodeInput, ctx) -> str:
 # ---------------------------------------------------------------------------
 
 def main():
-    mcp.run(transport="streamable-http", port=8000, host="0.0.0.0")
+    mcp.run(transport="http", host="0.0.0.0", port=8000, stateless_http=True)
 
 
 if __name__ == "__main__":

@@ -1,6 +1,6 @@
 # govuk-mcp
 
-MCP server for GOV.UK — search, content retrieval, organisation lookup, and postcode resolution. 
+MCP server for GOV.UK — search, content retrieval, organisation lookup, and postcode resolution.
 
 ## Tools
 
@@ -12,31 +12,9 @@ MCP server for GOV.UK — search, content retrieval, organisation lookup, and po
 | `govuk_list_organisations` | Paginated list of all government organisations registered on GOV.UK |
 | `govuk_lookup_postcode` | Resolve a UK postcode to local authority, region, constituency, and NHS board |
 
-## APIs used
+All data is sourced from official public GOV.UK APIs and postcodes.io. No API keys required.
 
-- `https://www.gov.uk/api/search.json` — GOV.UK Search API (public, no auth)
-- `https://www.gov.uk/api/content{path}` — GOV.UK Content API (public, no auth)
-- `https://www.gov.uk/api/organisations` — GOV.UK Organisations API (public, no auth)
-- `https://api.postcodes.io` — postcodes.io (public, no auth)
-
-## Development
-
-```bash
-pip install -e .
-govuk-mcp
-# MCP endpoint: http://localhost:8000/mcp
-```
-
-## Deployment
-
-```bash
-fly launch --no-deploy     # first time only
-fly deploy
-```
-
-MCP endpoint: `https://govuk-mcp.fly.dev/mcp`
-
-## Usage example (Claude Desktop / claude.ai)
+## Usage (Claude Desktop / claude.ai)
 
 ```json
 {
