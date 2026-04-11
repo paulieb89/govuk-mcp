@@ -1,6 +1,6 @@
 # govuk-mcp
 
-MCP server for GOV.UK — search, content retrieval, organisation lookup, and postcode resolution. Deployed on Fly.io using FastMCP's streamable HTTP transport.
+MCP server for GOV.UK — search, content retrieval, organisation lookup, and postcode resolution. 
 
 ## Tools
 
