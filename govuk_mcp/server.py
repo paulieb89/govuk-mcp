@@ -2,13 +2,25 @@
 
 from __future__ import annotations
 
-import json
 from contextlib import asynccontextmanager
 from typing import Any, Optional
 
 import httpx
 from fastmcp import Context, FastMCP
 from pydantic import BaseModel, ConfigDict, Field
+
+from govuk_mcp.models import (
+    GovukContent,
+    GovukContentLinkItem,
+    GovukContentOrganisation,
+    GovukLocalAuthority,
+    GovukOrganisation,
+    GovukOrganisationsList,
+    GovukPostcode,
+    GovukSearchOrganisation,
+    GovukSearchResult,
+    GovukSearchResultItem,
+)
 
 # ---------------------------------------------------------------------------
 # Constants
@@ -69,33 +81,27 @@ def _client(ctx: Context) -> httpx.AsyncClient:
     return ctx.lifespan_context["client"]
 
 
-def _handle_http_error(e: httpx.HTTPStatusError) -> str:
-    status = e.response.status_code
-    if status == 404:
-        return json.dumps({"error": "Not found. Check the path or slug is correct."})
-    if status == 429:
-        return json.dumps({"error": "Rate limited by GOV.UK API. Please wait and retry."})
-    return json.dumps({"error": f"GOV.UK API returned HTTP {status}."})
-
-
-def _fmt_org(org: dict[str, Any]) -> dict[str, Any]:
-    """Flatten a single organisation record to a concise dict."""
-    return {
-        "title": org.get("title"),
-        "acronym": org.get("details", {}).get("acronym") or org.get("acronym"),
-        "slug": org.get("details", {}).get("slug") or org.get("slug"),
-        "type": org.get("details", {}).get("organisation_type") or org.get("organisation_type"),
-        "state": org.get("details", {}).get("govuk_status") or org.get("organisation_state"),
-        "web_url": org.get("web_url") or (
-            f"https://www.gov.uk/government/organisations/{org.get('details', {}).get('slug') or org.get('slug', '')}"
-        ),
-        "parent_organisations": [
-            p.get("title") for p in org.get("parent_organisations", [])
+def _fmt_org(org: dict[str, Any]) -> GovukOrganisation:
+    """Flatten a single organisation record to a GovukOrganisation model."""
+    details = org.get("details") or {}
+    slug = details.get("slug") or org.get("slug") or ""
+    contacts = details.get("contact_details") or org.get("contact_details")
+    return GovukOrganisation(
+        title=org.get("title"),
+        acronym=details.get("acronym") or org.get("acronym"),
+        slug=slug or None,
+        type=details.get("organisation_type") or org.get("organisation_type"),
+        state=details.get("govuk_status") or org.get("organisation_state"),
+        web_url=org.get("web_url")
+        or (f"https://www.gov.uk/government/organisations/{slug}" if slug else None),
+        parent_organisations=[
+            p.get("title") for p in org.get("parent_organisations", []) if p.get("title")
         ],
-        "child_organisations": [
-            c.get("title") for c in org.get("child_organisations", [])
+        child_organisations=[
+            c.get("title") for c in org.get("child_organisations", []) if c.get("title")
         ],
-    }
+        contact_details=contacts if contacts else None,
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -204,7 +210,7 @@ class PostcodeInput(BaseModel):
         "openWorldHint": True,
     },
 )
-async def govuk_search(params: SearchInput, ctx: Context) -> str:
+async def govuk_search(params: SearchInput, ctx: Context) -> GovukSearchResult:
     """Search GOV.UK's 700k+ content items using the official Search API.
 
     Returns a list of matching content items with title, description, link,
@@ -215,16 +221,8 @@ async def govuk_search(params: SearchInput, ctx: Context) -> str:
     official documents). Use filter_organisations to restrict to a department.
 
     Args:
-        params (SearchInput): Search parameters including query, count, start,
-            optional format/org filters, and optional sort order.
-
-    Returns:
-        str: JSON with keys:
-            - total (int): total matching results across all pages
-            - count (int): results in this response
-            - start (int): offset used
-            - results (list): each item has title, description, link,
-              format, organisations, public_timestamp
+        params: SearchInput with query, count, start, optional format/org
+            filters, and optional sort order.
     """
     client = _client(ctx)
 
@@ -241,38 +239,47 @@ async def govuk_search(params: SearchInput, ctx: Context) -> str:
     if params.order:
         query_params["order"] = params.order
 
-    try:
-        resp = await client.get(SEARCH_BASE, params=query_params)
-        resp.raise_for_status()
-        data = resp.json()
-    except httpx.HTTPStatusError as e:
-        return _handle_http_error(e)
-    except httpx.TimeoutException:
-        return json.dumps({"error": "Request to GOV.UK Search API timed out."})
+    resp = await client.get(SEARCH_BASE, params=query_params)
+    resp.raise_for_status()
+    data = resp.json()
 
     raw_results = data.get("results", [])
-    results = []
+    results: list[GovukSearchResultItem] = []
     for r in raw_results:
         orgs = [
-            {"title": o.get("title"), "acronym": o.get("acronym"), "slug": o.get("slug")}
+            GovukSearchOrganisation(
+                title=o.get("title"),
+                acronym=o.get("acronym"),
+                slug=o.get("slug"),
+            )
             for o in r.get("organisations", [])
         ]
-        results.append({
-            "title": r.get("title"),
-            "description": r.get("description"),
-            "link": r.get("link"),
-            "url": f"https://www.gov.uk{r.get('link', '')}",
-            "format": r.get("format"),
-            "organisations": orgs,
-            "public_timestamp": r.get("public_timestamp"),
-        })
+        link = r.get("link") or ""
+        results.append(
+            GovukSearchResultItem(
+                title=r.get("title"),
+                description=r.get("description"),
+                link=link or None,
+                url=f"https://www.gov.uk{link}" if link else None,
+                format=r.get("format"),
+                organisations=orgs,
+                public_timestamp=r.get("public_timestamp"),
+            )
+        )
 
-    return json.dumps({
-        "total": data.get("total", 0),
-        "count": len(results),
-        "start": params.start,
-        "results": results,
-    }, indent=2)
+    total = data.get("total", 0) or 0
+    returned = len(results)
+    has_more = (params.start + returned) < total if isinstance(total, int) else returned == params.count
+
+    return GovukSearchResult(
+        query=params.query,
+        total=total,
+        start=params.start,
+        count=params.count,
+        returned=returned,
+        has_more=has_more,
+        results=results,
+    )
 
 
 @mcp.tool(
@@ -285,7 +292,7 @@ async def govuk_search(params: SearchInput, ctx: Context) -> str:
         "openWorldHint": True,
     },
 )
-async def govuk_get_content(params: ContentInput, ctx: Context) -> str:
+async def govuk_get_content(params: ContentInput, ctx: Context) -> GovukContent:
     """Retrieve the full content item for a GOV.UK page by its base path.
 
     Returns the complete structured content including title, description,
@@ -297,60 +304,49 @@ async def govuk_get_content(params: ContentInput, ctx: Context) -> str:
     travel advice, and HMRC manuals in full.
 
     Args:
-        params (ContentInput): base_path of the content item (e.g. '/universal-credit').
-
-    Returns:
-        str: JSON content item. Key fields:
-            - title (str)
-            - description (str)
-            - document_type (str)
-            - schema_name (str)
-            - public_updated_at (str)
-            - details (dict): contains body, parts, or other schema-specific content
-            - links (dict): related organisations, policies, topics, etc.
+        params: ContentInput with the base_path of the content item
+            (e.g. '/universal-credit').
     """
     client = _client(ctx)
 
     path = params.base_path if params.base_path.startswith("/") else f"/{params.base_path}"
     url = f"{CONTENT_BASE}{path}"
 
-    try:
-        resp = await client.get(url)
-        resp.raise_for_status()
-        data = resp.json()
-    except httpx.HTTPStatusError as e:
-        return _handle_http_error(e)
-    except httpx.TimeoutException:
-        return json.dumps({"error": "Request to GOV.UK Content API timed out."})
+    resp = await client.get(url)
+    resp.raise_for_status()
+    data = resp.json()
 
-    # Extract the most useful fields rather than dumping 200KB of raw JSON
+    raw_links = data.get("links", {}) or {}
+
     orgs = [
-        {"title": o.get("title"), "base_path": o.get("base_path")}
-        for o in data.get("links", {}).get("organisations", [])
+        GovukContentOrganisation(title=o.get("title"), base_path=o.get("base_path"))
+        for o in raw_links.get("organisations", [])
     ]
-    primary_pub = data.get("links", {}).get("primary_publishing_organisation", [])
+    primary_pub = raw_links.get("primary_publishing_organisation", [])
     publisher = primary_pub[0].get("title") if primary_pub else None
 
-    output = {
-        "title": data.get("title"),
-        "description": data.get("description"),
-        "document_type": data.get("document_type"),
-        "schema_name": data.get("schema_name"),
-        "base_path": data.get("base_path"),
-        "public_updated_at": data.get("public_updated_at"),
-        "first_published_at": data.get("first_published_at"),
-        "publisher": publisher,
-        "organisations": orgs,
-        "locale": data.get("locale"),
-        "details": data.get("details", {}),
-        "links": {
-            k: [{"title": i.get("title"), "base_path": i.get("base_path")} for i in v]
-            for k, v in data.get("links", {}).items()
-            if isinstance(v, list) and v and isinstance(v[0], dict)
-        },
-    }
+    links: dict[str, list[GovukContentLinkItem]] = {}
+    for key, value in raw_links.items():
+        if isinstance(value, list) and value and isinstance(value[0], dict):
+            links[key] = [
+                GovukContentLinkItem(title=i.get("title"), base_path=i.get("base_path"))
+                for i in value
+            ]
 
-    return json.dumps(output, indent=2, ensure_ascii=False)
+    return GovukContent(
+        title=data.get("title"),
+        description=data.get("description"),
+        document_type=data.get("document_type"),
+        schema_name=data.get("schema_name"),
+        base_path=data.get("base_path"),
+        public_updated_at=data.get("public_updated_at"),
+        first_published_at=data.get("first_published_at"),
+        publisher=publisher,
+        organisations=orgs,
+        locale=data.get("locale"),
+        details=data.get("details", {}) or {},
+        links=links,
+    )
 
 
 @mcp.tool(
@@ -363,7 +359,7 @@ async def govuk_get_content(params: ContentInput, ctx: Context) -> str:
         "openWorldHint": True,
     },
 )
-async def govuk_get_organisation(params: OrganisationInput, ctx: Context) -> str:
+async def govuk_get_organisation(params: OrganisationInput, ctx: Context) -> GovukOrganisation:
     """Retrieve details for a specific UK government organisation by slug.
 
     Returns the organisation's full name, acronym, type (ministerial_department,
@@ -374,36 +370,18 @@ async def govuk_get_organisation(params: OrganisationInput, ctx: Context) -> str
     under a department, or resolving an acronym to a full organisation record.
 
     Args:
-        params (OrganisationInput): Organisation slug (e.g. 'hm-revenue-customs').
-
-    Returns:
-        str: JSON with fields:
-            - title, acronym, slug, type, state, web_url
-            - parent_organisations (list of titles)
-            - child_organisations (list of titles)
-            - contact_details (if available)
+        params: OrganisationInput with the organisation slug
+            (e.g. 'hm-revenue-customs').
     """
     client = _client(ctx)
 
     url = f"{ORGANISATIONS_BASE}/{params.slug}"
 
-    try:
-        resp = await client.get(url)
-        resp.raise_for_status()
-        data = resp.json()
-    except httpx.HTTPStatusError as e:
-        return _handle_http_error(e)
-    except httpx.TimeoutException:
-        return json.dumps({"error": "Request timed out."})
+    resp = await client.get(url)
+    resp.raise_for_status()
+    data = resp.json()
 
-    result = _fmt_org(data)
-
-    # Add contact details if present
-    contacts = data.get("details", {}).get("contact_details") or data.get("contact_details")
-    if contacts:
-        result["contact_details"] = contacts
-
-    return json.dumps(result, indent=2, ensure_ascii=False)
+    return _fmt_org(data)
 
 
 @mcp.tool(
@@ -416,7 +394,9 @@ async def govuk_get_organisation(params: OrganisationInput, ctx: Context) -> str
         "openWorldHint": True,
     },
 )
-async def govuk_list_organisations(params: OrganisationsListInput, ctx: Context) -> str:
+async def govuk_list_organisations(
+    params: OrganisationsListInput, ctx: Context
+) -> GovukOrganisationsList:
     """List all UK government organisations registered on GOV.UK.
 
     Returns a paginated list of organisations including their slug, acronym,
@@ -424,37 +404,38 @@ async def govuk_list_organisations(params: OrganisationsListInput, ctx: Context)
     discover slugs for use with govuk_get_organisation or govuk_search filters.
 
     Args:
-        params (OrganisationsListInput): page (1-based) and per_page (1–50).
-
-    Returns:
-        str: JSON with fields:
-            - total (int): total number of organisations
-            - page (int), per_page (int), total_pages (int)
-            - organisations (list): each with title, acronym, slug, type, state
+        params: OrganisationsListInput with 1-based page and per_page (1–50).
     """
     client = _client(ctx)
 
-    try:
-        resp = await client.get(
-            ORGANISATIONS_BASE,
-            params={"page": params.page, "per_page": params.per_page},
-        )
-        resp.raise_for_status()
-        data = resp.json()
-    except httpx.HTTPStatusError as e:
-        return _handle_http_error(e)
-    except httpx.TimeoutException:
-        return json.dumps({"error": "Request timed out."})
+    resp = await client.get(
+        ORGANISATIONS_BASE,
+        params={"page": params.page, "per_page": params.per_page},
+    )
+    resp.raise_for_status()
+    data = resp.json()
 
     orgs = [_fmt_org(o) for o in data.get("results", [])]
 
-    return json.dumps({
-        "total": data.get("total"),
-        "page": params.page,
-        "per_page": params.per_page,
-        "total_pages": data.get("pages"),
-        "organisations": orgs,
-    }, indent=2, ensure_ascii=False)
+    total = data.get("total")
+    total_pages = data.get("pages")
+    returned = len(orgs)
+    if isinstance(total, int):
+        has_more = (params.page * params.per_page) < total
+    elif isinstance(total_pages, int):
+        has_more = params.page < total_pages
+    else:
+        has_more = returned == params.per_page
+
+    return GovukOrganisationsList(
+        page=params.page,
+        per_page=params.per_page,
+        total=total if isinstance(total, int) else None,
+        total_pages=total_pages if isinstance(total_pages, int) else None,
+        returned=returned,
+        has_more=has_more,
+        organisations=orgs,
+    )
 
 
 @mcp.tool(
@@ -467,7 +448,7 @@ async def govuk_list_organisations(params: OrganisationsListInput, ctx: Context)
         "openWorldHint": True,
     },
 )
-async def govuk_lookup_postcode(params: PostcodeInput, ctx: Context) -> str:
+async def govuk_lookup_postcode(params: PostcodeInput, ctx: Context) -> GovukPostcode:
     """Look up a UK postcode to retrieve its local authority, region, constituency,
     and other administrative geography.
 
@@ -478,50 +459,34 @@ async def govuk_lookup_postcode(params: PostcodeInput, ctx: Context) -> str:
     Uses the postcodes.io public API (no key required).
 
     Args:
-        params (PostcodeInput): UK postcode (e.g. 'NG1 1AA', 'SW1A 2AA').
-
-    Returns:
-        str: JSON with fields:
-            - postcode (str)
-            - local_authority (dict): name and code
-            - region (str)
-            - country (str)
-            - parliamentary_constituency (str)
-            - nhs_integrated_care_board (str, if available)
-            - latitude, longitude
-            - codes (dict): GSS codes for all geographies
+        params: PostcodeInput with a UK postcode (e.g. 'NG1 1AA', 'SW1A 2AA').
     """
     client = _client(ctx)
     postcode = params.postcode.replace(" ", "").upper()
     url = f"{LOCATIONS_BASE}/postcodes/{postcode}"
 
-    try:
-        resp = await client.get(url)
-        resp.raise_for_status()
-        data = resp.json().get("result", {})
-    except httpx.HTTPStatusError as e:
-        if e.response.status_code == 404:
-            return json.dumps({"error": f"Postcode '{params.postcode}' not found or invalid."})
-        return _handle_http_error(e)
-    except httpx.TimeoutException:
-        return json.dumps({"error": "Postcode lookup timed out."})
+    resp = await client.get(url)
+    resp.raise_for_status()
+    data = resp.json().get("result", {}) or {}
 
-    return json.dumps({
-        "postcode": data.get("postcode"),
-        "latitude": data.get("latitude"),
-        "longitude": data.get("longitude"),
-        "country": data.get("country"),
-        "region": data.get("region"),
-        "parliamentary_constituency": data.get("parliamentary_constituency"),
-        "parliamentary_constituency_2025": data.get("parliamentary_constituency_2025"),
-        "local_authority": {
-            "name": data.get("admin_district"),
-            "code": data.get("codes", {}).get("admin_district"),
-        },
-        "admin_county": data.get("admin_county"),
-        "nhs_integrated_care_board": data.get("integrated_care_board"),
-        "codes": data.get("codes", {}),
-    }, indent=2)
+    codes = data.get("codes", {}) or {}
+
+    return GovukPostcode(
+        postcode=data.get("postcode"),
+        latitude=data.get("latitude"),
+        longitude=data.get("longitude"),
+        country=data.get("country"),
+        region=data.get("region"),
+        parliamentary_constituency=data.get("parliamentary_constituency"),
+        parliamentary_constituency_2025=data.get("parliamentary_constituency_2025"),
+        local_authority=GovukLocalAuthority(
+            name=data.get("admin_district"),
+            code=codes.get("admin_district"),
+        ),
+        admin_county=data.get("admin_county"),
+        nhs_integrated_care_board=data.get("integrated_care_board"),
+        codes=codes,
+    )
 
 
 # ---------------------------------------------------------------------------
