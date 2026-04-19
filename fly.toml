@@ -20,6 +20,14 @@ primary_region = 'lhr'
     hard_limit = 50
     soft_limit = 25
 
+[checks]
+  [checks.health]
+    port = 8000
+    type = 'http'
+    interval = '30s'
+    timeout = '5s'
+    path = '/health'
+
 [[vm]]
   size = 'shared-cpu-1x'
   memory = '256mb'

@@ -8,6 +8,7 @@ from typing import Any, Optional
 import httpx
 from fastmcp import Context, FastMCP
 from pydantic import BaseModel, ConfigDict, Field
+from starlette.responses import JSONResponse
 
 from govuk_mcp.models import (
     GovukContent,
@@ -71,6 +72,11 @@ mcp = FastMCP(
     ),
     lifespan=lifespan,
 )
+
+
+@mcp.custom_route("/health", methods=["GET"])
+async def health(request):
+    return JSONResponse({"status": "ok", "server": "govuk-mcp"})
 
 
 # ---------------------------------------------------------------------------
