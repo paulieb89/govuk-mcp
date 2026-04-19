@@ -269,3 +269,55 @@ class GovukPostcode(BaseModel):
         default_factory=dict,
         description="GSS codes for all administrative geographies covering this postcode.",
     )
+
+
+# ---------------------------------------------------------------------------
+# Phase-4 drill-down: govuk_grep_content
+# ---------------------------------------------------------------------------
+
+
+class GrepContentInput(BaseModel):
+    """Input schema for govuk_grep_content."""
+
+    model_config = ConfigDict(str_strip_whitespace=True, extra="forbid")
+
+    base_path: str = Field(
+        ...,
+        min_length=1,
+        max_length=500,
+        description=(
+            "GOV.UK base_path of a content item, e.g. 'guidance/planning-"
+            "guidance-letters-to-chief-planning-officers' (leading slash "
+            "optional). Use govuk_search to discover base_paths."
+        ),
+    )
+    pattern: str = Field(
+        ...,
+        min_length=2,
+        max_length=200,
+        description=(
+            "Regex pattern (or plain substring) to search within the body. "
+            "If the pattern doesn't compile as regex, falls back to literal "
+            "substring match."
+        ),
+    )
+    case_insensitive: bool = Field(True, description="Default true.")
+    max_hits: int = Field(25, ge=1, le=100, description="Cap on returned hits.")
+
+
+class GrepHit(BaseModel):
+    """A single section match from govuk_grep_content."""
+
+    anchor: str = Field(..., description="HTML anchor id of the containing <h2> section")
+    heading: str = Field(..., description="Plain-text heading of the containing <h2>")
+    snippet: str = Field(..., description="~200 chars of context around the match")
+    match: str = Field(..., description="The exact text that matched the pattern")
+
+
+class GrepContentResult(BaseModel):
+    """Output schema for govuk_grep_content."""
+
+    base_path: str = Field(..., description="The content item that was searched")
+    pattern: str = Field(..., description="The pattern that was searched for")
+    hits: list[GrepHit] = Field(..., description="Matching sections in document order")
+    truncated: bool = Field(..., description="True if hit count reached max_hits and more matches may exist")
