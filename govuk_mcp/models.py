@@ -36,7 +36,7 @@ class GovukSearchResultItem(BaseModel):
     description: Optional[str] = Field(None, description="Short human-readable summary of the page.")
     link: Optional[str] = Field(
         None,
-        description="GOV.UK relative path for the page, e.g. '/universal-credit'. Pass to govuk_get_content as base_path.",
+        description="GOV.UK relative path for the page, e.g. '/universal-credit'. Use as base_path in govuk:// resource URIs — the next_steps field constructs them for you.",
     )
     url: Optional[str] = Field(None, description="Absolute https://www.gov.uk URL for the page.")
     format: Optional[str] = Field(
@@ -50,6 +50,16 @@ class GovukSearchResultItem(BaseModel):
     public_timestamp: Optional[str] = Field(
         None,
         description="ISO-8601 timestamp for when this page was last publicly updated.",
+    )
+    next_steps: dict[str, str] = Field(
+        default_factory=dict,
+        description=(
+            "Canonical resource URIs and tool for reading this content item. "
+            "Read `header` first for orientation, then `index` to discover sections, "
+            "then `section_template` (substitute the anchor from the index) for "
+            "specific sections. Use `grep_tool` for content discovery instead of "
+            "reading every section."
+        ),
     )
 
 

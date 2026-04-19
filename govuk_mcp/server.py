@@ -242,6 +242,7 @@ async def govuk_search(params: SearchInput, ctx: Context) -> GovukSearchResult:
             for o in r.get("organisations", [])
         ]
         link = r.get("link") or ""
+        base = link.lstrip("/")
         results.append(
             GovukSearchResultItem(
                 title=r.get("title"),
@@ -251,6 +252,14 @@ async def govuk_search(params: SearchInput, ctx: Context) -> GovukSearchResult:
                 format=r.get("format"),
                 organisations=orgs,
                 public_timestamp=r.get("public_timestamp"),
+                next_steps=({
+                    "header": f"govuk://content/{base}/header",
+                    "index": f"govuk://content/{base}/index",
+                    "section_template": f"govuk://content/{base}/section/{{anchor}}",
+                    "details_template": f"govuk://content/{base}/details/{{field}}",
+                    "links_template": f"govuk://content/{base}/links/{{rel}}",
+                    "grep_tool": f"govuk_grep_content(base_path={base!r}, pattern=...)",
+                } if link else {}),
             )
         )
 
