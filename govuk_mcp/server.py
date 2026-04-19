@@ -7,13 +7,16 @@ from typing import Any, Optional
 
 import httpx
 from fastmcp import Context, FastMCP
+from fastmcp.server.middleware.caching import (
+    CallToolSettings,
+    ReadResourceSettings,
+    ResponseCachingMiddleware,
+)
+from fastmcp.server.transforms import ResourcesAsTools
 from pydantic import BaseModel, ConfigDict, Field
 from starlette.responses import JSONResponse
 
 from govuk_mcp.models import (
-    GovukContent,
-    GovukContentLinkItem,
-    GovukContentOrganisation,
     GovukLocalAuthority,
     GovukOrganisation,
     GovukOrganisationsList,
@@ -21,7 +24,12 @@ from govuk_mcp.models import (
     GovukSearchOrganisation,
     GovukSearchResult,
     GovukSearchResultItem,
+    GrepContentInput,
+    GrepContentResult,
+    GrepHit,
 )
+from govuk_mcp.resources import register_govuk_resources
+from govuk_mcp import parsers
 
 # ---------------------------------------------------------------------------
 # Constants
@@ -64,11 +72,13 @@ async def lifespan(server: FastMCP):
 mcp = FastMCP(
     "govuk_mcp",
     instructions=(
-        "Tools for searching GOV.UK content, retrieving full content items, "
-        "looking up government organisations, and resolving UK postcodes to "
-        "local authority areas. All data is sourced from official GOV.UK APIs. "
-        "Use govuk_search first to find content, then govuk_get_content to "
-        "retrieve the full item by its base_path."
+        "Tools for searching GOV.UK and resolving UK postcodes to local authority areas. "
+        "All data is sourced from official GOV.UK APIs. "
+        "Use govuk_search first to find content; then read it via the drill-down "
+        "resources govuk://content/{base_path}/{header,index,section/{anchor},details/{field},links/{rel}}. "
+        "For content discovery, use govuk_grep_content. "
+        "Look up an organisation by slug via govuk://organisation/{slug} or browse all via govuk_list_organisations. "
+        "Use govuk_lookup_postcode to resolve a UK postcode to administrative geography."
     ),
     lifespan=lifespan,
 )
@@ -152,35 +162,6 @@ class SearchInput(BaseModel):
     order: Optional[str] = Field(
         default=None,
         description="Sort order. Use '-public_timestamp' for newest-first (default relevance).",
-    )
-
-
-class ContentInput(BaseModel):
-    model_config = ConfigDict(str_strip_whitespace=True, extra="forbid")
-
-    base_path: str = Field(
-        ...,
-        description=(
-            "GOV.UK base path for the content item, e.g. '/universal-credit', "
-            "'/check-mot-history', '/government/organisations/hm-revenue-customs'. "
-            "Always starts with '/'."
-        ),
-        min_length=2,
-        max_length=500,
-    )
-
-
-class OrganisationInput(BaseModel):
-    model_config = ConfigDict(str_strip_whitespace=True, extra="forbid")
-
-    slug: str = Field(
-        ...,
-        description=(
-            "Organisation slug, e.g. 'hm-revenue-customs', 'department-for-work-pensions', "
-            "'companies-house', 'driver-and-vehicle-standards-agency'."
-        ),
-        min_length=2,
-        max_length=200,
     )
 
 
@@ -289,105 +270,46 @@ async def govuk_search(params: SearchInput, ctx: Context) -> GovukSearchResult:
 
 
 @mcp.tool(
-    name="govuk_get_content",
+    name="govuk_grep_content",
     annotations={
-        "title": "Get GOV.UK Content Item",
+        "title": "Search within a GOV.UK content body",
         "readOnlyHint": True,
         "destructiveHint": False,
         "idempotentHint": True,
         "openWorldHint": True,
     },
 )
-async def govuk_get_content(params: ContentInput, ctx: Context) -> GovukContent:
-    """Retrieve the full content item for a GOV.UK page by its base path.
+async def govuk_grep_content(params: GrepContentInput, ctx: Context) -> GrepContentResult:
+    """Find body sections in a GOV.UK content item matching a pattern.
 
-    Returns the complete structured content including title, description,
-    body text (where available), document type, publishing organisation,
-    links to related content, and metadata.
+    Returns a list of `{anchor, heading, snippet, match}` hits — small per-section
+    snippets centred on the match — so the LLM can decide which full sections to
+    read via `govuk://content/{base_path}/section/{anchor}`.
 
-    Use govuk_search first to discover base paths, then this tool to read
-    the full content. Particularly useful for reading guides, publications,
-    travel advice, and HMRC manuals in full.
+    Use this when answering content-based questions ("what does this guide say
+    about X?", "find the bit about eligibility") rather than navigating by
+    section number (which uses the index resource).
 
-    Args:
-        params: ContentInput with the base_path of the content item
-            (e.g. '/universal-credit').
+    Pattern is regex; if it doesn't compile, falls back to literal substring.
     """
     client = _client(ctx)
-
-    path = params.base_path if params.base_path.startswith("/") else f"/{params.base_path}"
-    url = f"{CONTENT_BASE}{path}"
-
-    resp = await client.get(url)
+    clean = params.base_path.lstrip("/")
+    resp = await client.get(f"{CONTENT_BASE}/{clean}")
     resp.raise_for_status()
-    data = resp.json()
+    payload = resp.json()
 
-    raw_links = data.get("links", {}) or {}
-
-    orgs = [
-        GovukContentOrganisation(title=o.get("title"), base_path=o.get("base_path"))
-        for o in raw_links.get("organisations", [])
-    ]
-    primary_pub = raw_links.get("primary_publishing_organisation", [])
-    publisher = primary_pub[0].get("title") if primary_pub else None
-
-    links: dict[str, list[GovukContentLinkItem]] = {}
-    for key, value in raw_links.items():
-        if isinstance(value, list) and value and isinstance(value[0], dict):
-            links[key] = [
-                GovukContentLinkItem(title=i.get("title"), base_path=i.get("base_path"))
-                for i in value
-            ]
-
-    return GovukContent(
-        title=data.get("title"),
-        description=data.get("description"),
-        document_type=data.get("document_type"),
-        schema_name=data.get("schema_name"),
-        base_path=data.get("base_path"),
-        public_updated_at=data.get("public_updated_at"),
-        first_published_at=data.get("first_published_at"),
-        publisher=publisher,
-        organisations=orgs,
-        locale=data.get("locale"),
-        details=data.get("details", {}) or {},
-        links=links,
+    hits = parsers.grep_body(
+        payload,
+        params.pattern,
+        case_insensitive=params.case_insensitive,
+        max_hits=params.max_hits,
     )
-
-
-@mcp.tool(
-    name="govuk_get_organisation",
-    annotations={
-        "title": "Get GOV.UK Organisation",
-        "readOnlyHint": True,
-        "destructiveHint": False,
-        "idempotentHint": True,
-        "openWorldHint": True,
-    },
-)
-async def govuk_get_organisation(params: OrganisationInput, ctx: Context) -> GovukOrganisation:
-    """Retrieve details for a specific UK government organisation by slug.
-
-    Returns the organisation's full name, acronym, type (ministerial_department,
-    executive_agency, non_ministerial_department, etc.), status (live/closed),
-    parent departments, and child bodies.
-
-    Useful for understanding departmental structure, finding which agencies sit
-    under a department, or resolving an acronym to a full organisation record.
-
-    Args:
-        params: OrganisationInput with the organisation slug
-            (e.g. 'hm-revenue-customs').
-    """
-    client = _client(ctx)
-
-    url = f"{ORGANISATIONS_BASE}/{params.slug}"
-
-    resp = await client.get(url)
-    resp.raise_for_status()
-    data = resp.json()
-
-    return _fmt_org(data)
+    return GrepContentResult(
+        base_path=clean,
+        pattern=params.pattern,
+        hits=[GrepHit(**h) for h in hits],
+        truncated=len(hits) >= params.max_hits,
+    )
 
 
 @mcp.tool(
@@ -493,6 +415,30 @@ async def govuk_lookup_postcode(params: PostcodeInput, ctx: Context) -> GovukPos
         nhs_integrated_care_board=data.get("integrated_care_board"),
         codes=codes,
     )
+
+
+# ---------------------------------------------------------------------------
+# Resources + transforms + caching (after tool registrations above)
+# ---------------------------------------------------------------------------
+
+# govuk:// resource templates — header, index, section, details, links,
+# organisation. Replace the deleted govuk_get_content / govuk_get_organisation
+# tools with bounded URI-addressed reads.
+register_govuk_resources(mcp)
+
+# Tool-only client coverage (Apps, ChatGPT, Ledgerhall proxy clients) —
+# auto-generates list_resources + read_resource tools that route through the
+# server's middleware chain. Without this, tool-only clients can't reach the
+# new govuk:// resources.
+mcp.add_transform(ResourcesAsTools(mcp))
+
+# Response caching for resources/read AND tools/call. Every surface here is
+# read-only/idempotent, GOV.UK content is stable enough that 1h is the right
+# TTL. In-memory only (single Fly machine).
+mcp.add_middleware(ResponseCachingMiddleware(
+    read_resource_settings=ReadResourceSettings(ttl=3600),
+    call_tool_settings=CallToolSettings(ttl=3600),
+))
 
 
 # ---------------------------------------------------------------------------
