@@ -89,6 +89,14 @@ async def health(request):
     return JSONResponse({"status": "ok", "server": "govuk-mcp"})
 
 
+@mcp.custom_route("/.well-known/glama.json", methods=["GET"])
+async def glama_connector_manifest(request):
+    return JSONResponse({
+        "$schema": "https://glama.ai/mcp/schemas/connector.json",
+        "maintainers": [{"email": "paulboucherat@gmail.com"}],
+    })
+
+
 # ---------------------------------------------------------------------------
 # Shared helpers
 # ---------------------------------------------------------------------------
