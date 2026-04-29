@@ -4,52 +4,92 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project
 
-govuk-mcp is an MCP (Model Context Protocol) server that exposes UK government data through 5 read-only tools: `govuk_search`, `govuk_get_content`, `govuk_get_organisation`, `govuk_list_organisations`, and `govuk_lookup_postcode`. All external APIs are public and require no authentication.
+govuk-mcp is an MCP server exposing UK government data through **7 read-only tools** and **6 resource templates**. All external APIs are public and require no authentication.
+
+### Tools
+
+| Tool | What it does |
+|------|--------------|
+| `govuk_search` | Full-text search across GOV.UK's 700k+ content items |
+| `govuk_grep_content` | Regex/substring search within a specific GOV.UK page body |
+| `govuk_get_content` | Page metadata + navigable section index by base_path |
+| `govuk_get_section` | Body HTML for a single named section (anchor) of a page |
+| `govuk_get_organisation` | Full organisation profile by slug |
+| `govuk_list_organisations` | Paginated list of all UK government organisations |
+| `govuk_lookup_postcode` | Resolve a UK postcode to local authority, region, constituency |
+
+`govuk_get_content`, `govuk_get_section`, and `govuk_get_organisation` are **named companion tools** (lesson 35 pattern) — they serve tool-only clients (ChatGPT, Ledgerhall proxy) with clean `dict`/Pydantic returns. Protocol-aware clients (Claude, Cursor) can use the equivalent `govuk://` resources directly.
+
+### Resources (govuk:// URI templates)
+
+For protocol-aware clients. Same underlying data as the companion tools, but URI-addressed and bounded.
+
+| URI template | Returns |
+|---|---|
+| `govuk://content/{base_path*}/header` | Page metadata (title, doc type, dates) |
+| `govuk://content/{base_path*}/index` | Section anchor:heading list |
+| `govuk://content/{base_path*}/section/{anchor}` | Bounded HTML for one section |
+| `govuk://content/{base_path*}/details/{field}` | Schema-specific details field (body, attachments, etc.) |
+| `govuk://content/{base_path*}/links/{rel}` | Related content by link type |
+| `govuk://organisation/{slug}` | Organisation profile |
 
 ## Commands
 
 ```bash
-pip install -e .       # Install in editable mode
-govuk-mcp              # Run server on http://localhost:8000/mcp
-fly deploy             # Deploy to Fly.io (https://govuk-mcp.fly.dev/mcp)
+uv sync --group dev   # Install dependencies including dev/test tools
+uv run govuk-mcp      # Run server on http://localhost:8000/mcp
+fly deploy            # Deploy to Fly.io (https://govuk-mcp.fly.dev/mcp)
 ```
 
-There are no tests, linting, or type-checking configured yet.
+```bash
+# Run live matrix test (calls all 9 cases in-process, prints token table)
+uv run python -m tests.live.run_matrix
+```
 
 ## Architecture
 
-The entire server lives in a single file: `govuk_mcp/server.py` (536 lines). It uses:
+```
+govuk_mcp/
+  server.py     — FastMCP instance, lifespan, input models, all 7 tools
+  resources.py  — govuk:// resource template registrations
+  parsers.py    — Pure-function HTML extraction (extract_header, extract_index, extract_section, grep_body)
+  models.py     — Output Pydantic models (GovukSearchResult, GovukOrganisation, GovukPostcode, ...)
+```
 
-- **FastMCP 2.0+** as the MCP framework (`@mcp.tool()` decorators)
-- **httpx** async client for all outbound HTTP, managed via a FastMCP lifespan context manager
-- **Pydantic** models for input validation (`ConfigDict(extra="forbid", str_strip_whitespace=True)`)
+### Key patterns
 
-### Code structure within govuk_mcp/server.py
+- **Lifespan-managed httpx client** — single `AsyncClient` per process, injected via `ctx.lifespan_context["client"]`
+- **`_client(ctx)`** — typed accessor for the shared client
+- **`_fmt_org(org)`** — normalises GOV.UK Organisations API response → `GovukOrganisation`
+- **Parsers are pure functions** — take raw Content API payload dict, no HTTP, offline-testable
+- **Input models use `extra="forbid"`** — rejects hallucinated parameters from tool-only clients
+- **Tools return Pydantic models or dicts** — FastMCP auto-generates outputSchema and structuredContent
+- **Resources return `str`** — MCP resource contract; complex data serialised via `json.dumps()`
 
-1. **Constants** (lines ~14-34) — API base URLs, timeout (15s), document format whitelist
-2. **Lifespan** (lines ~41-61) — `httpx.AsyncClient` created once and shared via `lifespan_state["client"]`
-3. **Helpers** (lines ~68-98) — `_client(ctx)` extracts the HTTP client from context; `_handle_http_error` maps status codes; `_fmt_org` flattens organisation records
-4. **Input models** (lines ~105-191) — 5 Pydantic models with field descriptions that auto-generate MCP tool parameter hints
-5. **Tools** (lines ~197-525) — 5 async tool functions, each returning JSON strings
-6. **Entrypoint** (lines ~531-536) — `main()` runs streamable-http transport on port 8000
+### Middleware / transforms
 
-### Key pattern
+```python
+register_govuk_resources(mcp)   # govuk:// resource templates (protocol-aware clients)
 
-Every tool follows the same structure: validate input via Pydantic model -> get shared httpx client from context -> make API call -> handle errors (404/429/timeout) -> extract/flatten relevant fields -> return `json.dumps()`.
+mcp.add_middleware(ResponseCachingMiddleware(
+    read_resource_settings=ReadResourceSettings(ttl=3600),
+    call_tool_settings=CallToolSettings(ttl=3600),
+))
+```
 
-## Package structure
-
-`pyproject.toml` declares the entry point as `govuk_mcp.server:main` and the build target as `packages = ["govuk_mcp"]`. The Dockerfile copies `govuk_mcp/` into the container image.
+`ResourcesAsTools` is intentionally **not used** — it double-encodes resource `str` returns as `{"result": "..."}`, breaking tool-only clients (lesson 34). Named companion tools are the correct pattern (lesson 35).
 
 ## External APIs
 
 | API | Base URL | Auth |
 |-----|----------|------|
 | GOV.UK Search | `https://www.gov.uk/api/search.json` | None |
-| GOV.UK Content | `https://www.gov.uk/api/content{path}` | None |
+| GOV.UK Content | `https://www.gov.uk/api/content` | None |
 | GOV.UK Organisations | `https://www.gov.uk/api/organisations` | None |
 | postcodes.io | `https://api.postcodes.io` | None |
 
 ## Deployment
 
 Fly.io, London region (lhr), shared-cpu-1x/256MB. Always-on (min 1 machine). Config in `fly.toml`.
+
+Secrets: none required (all APIs are public).

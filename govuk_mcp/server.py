@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from contextlib import asynccontextmanager
-from typing import Any, Optional
+from typing import Annotated, Any, Optional
 
 import httpx
 from fastmcp import Context, FastMCP
@@ -12,7 +12,6 @@ from fastmcp.server.middleware.caching import (
     ReadResourceSettings,
     ResponseCachingMiddleware,
 )
-from fastmcp.server.transforms import ResourcesAsTools
 from pydantic import BaseModel, ConfigDict, Field
 from starlette.responses import JSONResponse
 
@@ -74,10 +73,10 @@ mcp = FastMCP(
     instructions=(
         "Tools for searching GOV.UK and resolving UK postcodes to local authority areas. "
         "All data is sourced from official GOV.UK APIs. "
-        "Use govuk_search first to find content; then read it via the drill-down "
-        "resources govuk://content/{base_path}/{header,index,section/{anchor},details/{field},links/{rel}}. "
-        "For content discovery, use govuk_grep_content. "
-        "Look up an organisation by slug via govuk://organisation/{slug} or browse all via govuk_list_organisations. "
+        "Use govuk_search to find content, then govuk_get_content for page metadata and section list, "
+        "govuk_get_section to read a specific section, govuk_grep_content to search within a page body. "
+        "Use govuk_list_organisations to browse all government organisations and discover slugs, "
+        "then govuk_get_organisation for a full profile. "
         "Use govuk_lookup_postcode to resolve a UK postcode to administrative geography."
     ),
     lifespan=lifespan,
@@ -261,12 +260,8 @@ async def govuk_search(params: SearchInput, ctx: Context) -> GovukSearchResult:
                 organisations=orgs,
                 public_timestamp=r.get("public_timestamp"),
                 next_steps=({
-                    "header": f"govuk://content/{base}/header",
-                    "index": f"govuk://content/{base}/index",
-                    "section_template": f"govuk://content/{base}/section/{{anchor}}",
-                    "details_template": f"govuk://content/{base}/details/{{field}}",
-                    "links_template": f"govuk://content/{base}/links/{{rel}}",
-                    "grep_tool": f"govuk_grep_content(base_path={base!r}, pattern=...)",
+                    "get_content": f"govuk_get_content(base_path={base!r})",
+                    "grep": f"govuk_grep_content(base_path={base!r}, pattern=...)",
                 } if link else {}),
             )
         )
@@ -434,20 +429,111 @@ async def govuk_lookup_postcode(params: PostcodeInput, ctx: Context) -> GovukPos
     )
 
 
+@mcp.tool(
+    name="govuk_get_content",
+    annotations={
+        "title": "Get GOV.UK Page",
+        "readOnlyHint": True,
+        "destructiveHint": False,
+        "idempotentHint": True,
+        "openWorldHint": True,
+    },
+)
+async def govuk_get_content(
+    base_path: Annotated[str, Field(description="GOV.UK base_path, e.g. '/universal-credit' or 'universal-credit'", min_length=1, max_length=500)],
+    ctx: Context,
+) -> dict:
+    """Get metadata and navigable section index for a GOV.UK page.
+
+    Returns the page title, document type, publication dates, and a list of
+    sections with their anchor IDs and headings. Use govuk_get_section to
+    read the body of a specific section, or govuk_grep_content to search
+    within the page body.
+    """
+    path = base_path.lstrip("/")
+    client = _client(ctx)
+    resp = await client.get(f"{CONTENT_BASE}/{path}")
+    resp.raise_for_status()
+    payload = resp.json()
+    header = parsers.extract_header(payload)
+    raw_index = parsers.extract_index(payload)
+    sections = []
+    for line in raw_index.strip().splitlines():
+        if ":" in line:
+            anchor, _, heading = line.partition(":")
+            sections.append({"anchor": anchor.strip(), "heading": heading.strip()})
+    return {**header, "sections": sections}
+
+
+@mcp.tool(
+    name="govuk_get_section",
+    annotations={
+        "title": "Get GOV.UK Page Section",
+        "readOnlyHint": True,
+        "destructiveHint": False,
+        "idempotentHint": True,
+        "openWorldHint": True,
+    },
+)
+async def govuk_get_section(
+    base_path: Annotated[str, Field(description="GOV.UK base_path, e.g. '/universal-credit'", min_length=1, max_length=500)],
+    anchor: Annotated[str, Field(description="Section anchor ID from govuk_get_content sections list", min_length=1, max_length=200)],
+    ctx: Context,
+) -> dict:
+    """Get the HTML content of one named section of a GOV.UK page.
+
+    Use govuk_get_content first to get the list of available section anchors,
+    then call this with the anchor of the section you want to read.
+    """
+    path = base_path.lstrip("/")
+    client = _client(ctx)
+    resp = await client.get(f"{CONTENT_BASE}/{path}")
+    resp.raise_for_status()
+    payload = resp.json()
+    try:
+        html = parsers.extract_section(payload, anchor)
+    except KeyError:
+        raise ValueError(
+            f"Section '{anchor}' not found in '{base_path}'. "
+            "Use govuk_get_content to list available anchors."
+        )
+    return {"base_path": base_path, "anchor": anchor, "content": html}
+
+
+@mcp.tool(
+    name="govuk_get_organisation",
+    annotations={
+        "title": "Get GOV.UK Organisation",
+        "readOnlyHint": True,
+        "destructiveHint": False,
+        "idempotentHint": True,
+        "openWorldHint": True,
+    },
+)
+async def govuk_get_organisation(
+    slug: Annotated[str, Field(description="Organisation slug, e.g. 'hm-revenue-customs'. Find slugs via govuk_list_organisations.", min_length=1, max_length=200)],
+    ctx: Context,
+) -> GovukOrganisation:
+    """Get the profile of a UK government organisation by its slug.
+
+    Returns name, acronym, type, status, web URL, and parent/child organisations.
+    Use govuk_list_organisations to browse all organisations and discover slugs.
+    """
+    client = _client(ctx)
+    resp = await client.get(f"{ORGANISATIONS_BASE}/{slug}")
+    resp.raise_for_status()
+    return _fmt_org(resp.json())
+
+
 # ---------------------------------------------------------------------------
-# Resources + transforms + caching (after tool registrations above)
+# Resources + caching (after tool registrations above)
 # ---------------------------------------------------------------------------
 
-# govuk:// resource templates — header, index, section, details, links,
-# organisation. Replace the deleted govuk_get_content / govuk_get_organisation
-# tools with bounded URI-addressed reads.
+# govuk:// resource templates for protocol-aware clients (Claude Desktop,
+# Cursor, Claude Code). Tool-only clients (ChatGPT, proxy bridge) use the
+# named companion tools above (govuk_get_content, govuk_get_section,
+# govuk_get_organisation) instead.
 register_govuk_resources(mcp)
-
-# Tool-only client coverage (Apps, ChatGPT, Ledgerhall proxy clients) —
-# auto-generates list_resources + read_resource tools that route through the
-# server's middleware chain. Without this, tool-only clients can't reach the
-# new govuk:// resources.
-mcp.add_transform(ResourcesAsTools(mcp))
 
 # Response caching for resources/read AND tools/call. Every surface here is
 # read-only/idempotent, GOV.UK content is stable enough that 1h is the right
