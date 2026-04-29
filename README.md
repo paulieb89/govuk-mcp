@@ -1,6 +1,7 @@
 # govuk-mcp
 
 [![govuk-mcp MCP server](https://glama.ai/mcp/servers/paulieb89/govuk-mcp/badges/card.svg)](https://glama.ai/mcp/servers/paulieb89/govuk-mcp)
+[![smithery badge](https://smithery.ai/badge/bouch/govuk)](https://smithery.ai/servers/bouch/govuk)
 
 MCP server for GOV.UK — search, content retrieval, organisation lookup, and postcode resolution.
 
