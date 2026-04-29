@@ -56,10 +56,25 @@ def extract_header(payload: dict) -> dict:
 
 
 def extract_index(payload: dict) -> str:
-    """Return one 'anchor: heading_text' row per real `<h2 id="...">` in
-    `details.body`, document order. Filters out attachment widgets and
-    other id-less h2s."""
-    body = payload.get("details", {}).get("body", "")
+    """Return one 'anchor: heading_text' row per navigable section.
+
+    For standard content (guidance, publications): scans `details.body` for
+    `<h2 id="...">` headings. For guide-format pages (document_type='guide'):
+    uses `details.parts` where each part's slug is the anchor.
+    """
+    details = payload.get("details", {})
+
+    # Guide format: multi-part pages use details.parts instead of h2 headings
+    parts = details.get("parts") or []
+    if parts:
+        return "\n".join(
+            f"{p['slug']}: {p['title']}"
+            for p in parts
+            if p.get("slug") and p.get("title")
+        )
+
+    # Standard format: h2 sections in details.body
+    body = details.get("body", "")
     rows = []
     for anchor, raw in _HEADING_WITH_ID.findall(body):
         text = _TAG.sub("", raw).strip()
@@ -68,9 +83,24 @@ def extract_index(payload: dict) -> str:
 
 
 def extract_section(payload: dict, anchor: str) -> str:
-    """Return the body slice from `<h2 id="anchor">` up to the next
-    `<h2 id="...">`. Raise KeyError if no such anchor exists."""
-    body = payload.get("details", {}).get("body", "")
+    """Return the content for a named section.
+
+    For guide-format pages: returns the body of the part whose slug matches
+    anchor. For standard pages: returns the HTML slice from `<h2 id="anchor">`
+    to the next `<h2 id="...">`. Raise KeyError if no such anchor exists.
+    """
+    details = payload.get("details", {})
+
+    # Guide format: look in parts by slug
+    parts = details.get("parts") or []
+    if parts:
+        for part in parts:
+            if part.get("slug") == anchor:
+                return part.get("body", "")
+        raise KeyError(f"No part with slug {anchor!r}")
+
+    # Standard format: h2 slice in body
+    body = details.get("body", "")
     pattern = re.compile(
         rf'<h2\b[^>]*\bid="{re.escape(anchor)}"[^>]*>',
         re.IGNORECASE,
