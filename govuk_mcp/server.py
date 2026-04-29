@@ -12,7 +12,7 @@ from fastmcp.server.middleware.caching import (
     ReadResourceSettings,
     ResponseCachingMiddleware,
 )
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import Field
 from starlette.responses import JSONResponse
 
 from govuk_mcp.models import (
@@ -23,7 +23,6 @@ from govuk_mcp.models import (
     GovukSearchOrganisation,
     GovukSearchResult,
     GovukSearchResultItem,
-    GrepContentInput,
     GrepContentResult,
     GrepHit,
 )
@@ -128,69 +127,6 @@ def _fmt_org(org: dict[str, Any]) -> GovukOrganisation:
 
 
 # ---------------------------------------------------------------------------
-# Input models
-# ---------------------------------------------------------------------------
-
-class SearchInput(BaseModel):
-    model_config = ConfigDict(str_strip_whitespace=True, extra="forbid")
-
-    query: str = Field(
-        ...,
-        description="Free-text search query, e.g. 'universal credit eligibility' or 'MOT check'",
-        min_length=1,
-        max_length=500,
-    )
-    count: int = Field(
-        default=10,
-        description="Number of results to return (1–50)",
-        ge=1,
-        le=MAX_COUNT,
-    )
-    start: int = Field(
-        default=0,
-        description="Offset for pagination, e.g. 10 for the second page of 10 results",
-        ge=0,
-    )
-    filter_format: Optional[str] = Field(
-        default=None,
-        description=(
-            "Filter by document format. Common values: 'guide', 'answer', 'transaction', "
-            "'publication', 'news_article', 'detailed_guide', 'hmrc_manual_section', "
-            "'travel_advice', 'organisation'. Leave blank to search all types."
-        ),
-    )
-    filter_organisations: Optional[str] = Field(
-        default=None,
-        description=(
-            "Filter by organisation slug, e.g. 'hm-revenue-customs', "
-            "'department-for-work-pensions', 'driver-and-vehicle-standards-agency'."
-        ),
-    )
-    order: Optional[str] = Field(
-        default=None,
-        description="Sort order. Use '-public_timestamp' for newest-first (default relevance).",
-    )
-
-
-class OrganisationsListInput(BaseModel):
-    model_config = ConfigDict(str_strip_whitespace=True, extra="forbid")
-
-    page: int = Field(default=1, description="Page number (1-based)", ge=1)
-    per_page: int = Field(default=20, description="Results per page (1–50)", ge=1, le=50)
-
-
-class PostcodeInput(BaseModel):
-    model_config = ConfigDict(str_strip_whitespace=True, extra="forbid")
-
-    postcode: str = Field(
-        ...,
-        description="UK postcode, e.g. 'SW1A 2AA' or 'NG1 1AA'. Spaces optional.",
-        min_length=5,
-        max_length=8,
-    )
-
-
-# ---------------------------------------------------------------------------
 # Tools
 # ---------------------------------------------------------------------------
 
@@ -204,7 +140,15 @@ class PostcodeInput(BaseModel):
         "openWorldHint": True,
     },
 )
-async def govuk_search(params: SearchInput, ctx: Context) -> GovukSearchResult:
+async def govuk_search(
+    query: Annotated[str, Field(description="Free-text search query, e.g. 'universal credit eligibility' or 'MOT check'", min_length=1, max_length=500)],
+    ctx: Context,
+    count: Annotated[int, Field(description="Number of results to return (1–50)", ge=1, le=MAX_COUNT)] = 10,
+    start: Annotated[int, Field(description="Offset for pagination, e.g. 10 for the second page of 10 results", ge=0)] = 0,
+    filter_format: Annotated[Optional[str], Field(description="Filter by document format. Common values: 'guide', 'answer', 'transaction', 'publication', 'news_article', 'detailed_guide', 'hmrc_manual_section', 'travel_advice', 'organisation'. Leave blank to search all types.")] = None,
+    filter_organisations: Annotated[Optional[str], Field(description="Filter by organisation slug, e.g. 'hm-revenue-customs', 'department-for-work-pensions', 'driver-and-vehicle-standards-agency'.")] = None,
+    order: Annotated[Optional[str], Field(description="Sort order. Use '-public_timestamp' for newest-first (default relevance).")] = None,
+) -> GovukSearchResult:
     """Search GOV.UK's 700k+ content items using the official Search API.
 
     Returns a list of matching content items with title, description, link,
@@ -213,25 +157,21 @@ async def govuk_search(params: SearchInput, ctx: Context) -> GovukSearchResult:
     Use filter_format to narrow to specific content types (e.g. 'transaction'
     for citizen-facing services, 'guide' for guidance, 'publication' for
     official documents). Use filter_organisations to restrict to a department.
-
-    Args:
-        params: SearchInput with query, count, start, optional format/org
-            filters, and optional sort order.
     """
     client = _client(ctx)
 
     query_params: dict[str, Any] = {
-        "q": params.query,
-        "count": params.count,
-        "start": params.start,
+        "q": query,
+        "count": count,
+        "start": start,
         "fields[]": ["title", "description", "link", "format", "organisations", "public_timestamp"],
     }
-    if params.filter_format:
-        query_params["filter_document_type"] = params.filter_format
-    if params.filter_organisations:
-        query_params["filter_organisations"] = params.filter_organisations
-    if params.order:
-        query_params["order"] = params.order
+    if filter_format:
+        query_params["filter_document_type"] = filter_format
+    if filter_organisations:
+        query_params["filter_organisations"] = filter_organisations
+    if order:
+        query_params["order"] = order
 
     resp = await client.get(SEARCH_BASE, params=query_params)
     resp.raise_for_status()
@@ -268,13 +208,13 @@ async def govuk_search(params: SearchInput, ctx: Context) -> GovukSearchResult:
 
     total = data.get("total", 0) or 0
     returned = len(results)
-    has_more = (params.start + returned) < total if isinstance(total, int) else returned == params.count
+    has_more = (start + returned) < total if isinstance(total, int) else returned == count
 
     return GovukSearchResult(
-        query=params.query,
+        query=query,
         total=total,
-        start=params.start,
-        count=params.count,
+        start=start,
+        count=count,
         returned=returned,
         has_more=has_more,
         results=results,
@@ -291,36 +231,42 @@ async def govuk_search(params: SearchInput, ctx: Context) -> GovukSearchResult:
         "openWorldHint": True,
     },
 )
-async def govuk_grep_content(params: GrepContentInput, ctx: Context) -> GrepContentResult:
+async def govuk_grep_content(
+    base_path: Annotated[str, Field(description="GOV.UK base_path, e.g. '/guidance/register-for-vat' or '/universal-credit'", min_length=1, max_length=500)],
+    pattern: Annotated[str, Field(description="Regex or literal substring to search for within the page body, e.g. 'payment' or 'eligible.*income'", min_length=1, max_length=200)],
+    ctx: Context,
+    case_insensitive: Annotated[bool, Field(description="If true (default), match case-insensitively")] = True,
+    max_hits: Annotated[int, Field(description="Maximum number of matching sections to return (1–100)", ge=1, le=100)] = 25,
+) -> GrepContentResult:
     """Find body sections in a GOV.UK content item matching a pattern.
 
     Returns a list of `{anchor, heading, snippet, match}` hits — small per-section
     snippets centred on the match — so the LLM can decide which full sections to
-    read via `govuk://content/{base_path}/section/{anchor}`.
+    read via govuk_get_section.
 
     Use this when answering content-based questions ("what does this guide say
     about X?", "find the bit about eligibility") rather than navigating by
-    section number (which uses the index resource).
+    section number.
 
     Pattern is regex; if it doesn't compile, falls back to literal substring.
     """
     client = _client(ctx)
-    clean = params.base_path.lstrip("/")
+    clean = base_path.lstrip("/")
     resp = await client.get(f"{CONTENT_BASE}/{clean}")
     resp.raise_for_status()
     payload = resp.json()
 
     hits = parsers.grep_body(
         payload,
-        params.pattern,
-        case_insensitive=params.case_insensitive,
-        max_hits=params.max_hits,
+        pattern,
+        case_insensitive=case_insensitive,
+        max_hits=max_hits,
     )
     return GrepContentResult(
         base_path=clean,
-        pattern=params.pattern,
+        pattern=pattern,
         hits=[GrepHit(**h) for h in hits],
-        truncated=len(hits) >= params.max_hits,
+        truncated=len(hits) >= max_hits,
     )
 
 
@@ -335,22 +281,21 @@ async def govuk_grep_content(params: GrepContentInput, ctx: Context) -> GrepCont
     },
 )
 async def govuk_list_organisations(
-    params: OrganisationsListInput, ctx: Context
+    ctx: Context,
+    page: Annotated[int, Field(description="Page number (1-based)", ge=1)] = 1,
+    per_page: Annotated[int, Field(description="Results per page (1–50)", ge=1, le=50)] = 20,
 ) -> GovukOrganisationsList:
     """List all UK government organisations registered on GOV.UK.
 
     Returns a paginated list of organisations including their slug, acronym,
     type, and status. Use this to browse the full government structure or
     discover slugs for use with govuk_get_organisation or govuk_search filters.
-
-    Args:
-        params: OrganisationsListInput with 1-based page and per_page (1–50).
     """
     client = _client(ctx)
 
     resp = await client.get(
         ORGANISATIONS_BASE,
-        params={"page": params.page, "per_page": params.per_page},
+        params={"page": page, "per_page": per_page},
     )
     resp.raise_for_status()
     data = resp.json()
@@ -361,15 +306,15 @@ async def govuk_list_organisations(
     total_pages = data.get("pages")
     returned = len(orgs)
     if isinstance(total, int):
-        has_more = (params.page * params.per_page) < total
+        has_more = (page * per_page) < total
     elif isinstance(total_pages, int):
-        has_more = params.page < total_pages
+        has_more = page < total_pages
     else:
-        has_more = returned == params.per_page
+        has_more = returned == per_page
 
     return GovukOrganisationsList(
-        page=params.page,
-        per_page=params.per_page,
+        page=page,
+        per_page=per_page,
         total=total if isinstance(total, int) else None,
         total_pages=total_pages if isinstance(total_pages, int) else None,
         returned=returned,
@@ -388,7 +333,10 @@ async def govuk_list_organisations(
         "openWorldHint": True,
     },
 )
-async def govuk_lookup_postcode(params: PostcodeInput, ctx: Context) -> GovukPostcode:
+async def govuk_lookup_postcode(
+    postcode: Annotated[str, Field(description="UK postcode, e.g. 'SW1A 2AA' or 'NG1 1AA'. Spaces optional.", min_length=5, max_length=8)],
+    ctx: Context,
+) -> GovukPostcode:
     """Look up a UK postcode to retrieve its local authority, region, constituency,
     and other administrative geography.
 
@@ -397,12 +345,9 @@ async def govuk_lookup_postcode(params: PostcodeInput, ctx: Context) -> GovukPos
     correct local service on GOV.UK (e.g. council tax, planning, waste).
 
     Uses the postcodes.io public API (no key required).
-
-    Args:
-        params: PostcodeInput with a UK postcode (e.g. 'NG1 1AA', 'SW1A 2AA').
     """
     client = _client(ctx)
-    postcode = params.postcode.replace(" ", "").upper()
+    postcode = postcode.replace(" ", "").upper()
     url = f"{LOCATIONS_BASE}/postcodes/{postcode}"
 
     resp = await client.get(url)
