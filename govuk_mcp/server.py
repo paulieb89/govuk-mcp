@@ -87,6 +87,11 @@ async def health(request):
     return JSONResponse({"status": "ok", "server": "govuk-mcp"})
 
 
+@mcp.custom_route("/.well-known/mcp/server-card.json", methods=["GET"])
+async def smithery_server_card(request):
+    return JSONResponse({"serverInfo": {"name": "govuk-mcp", "version": "0.2.1"}})
+
+
 @mcp.custom_route("/.well-known/glama.json", methods=["GET"])
 async def glama_connector_manifest(request):
     return JSONResponse({
