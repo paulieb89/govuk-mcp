@@ -5,6 +5,8 @@
 [![PyPI](https://img.shields.io/pypi/v/govuk-mcp)](https://pypi.org/project/govuk-mcp/)
 [![govuk-mcp MCP server](https://glama.ai/mcp/servers/paulieb89/govuk-mcp/badges/card.svg)](https://glama.ai/mcp/servers/paulieb89/govuk-mcp)
 [![smithery badge](https://smithery.ai/badge/bouch/govuk)](https://smithery.ai/servers/bouch/govuk)
+[![Install in VS Code](https://img.shields.io/badge/VS_Code-Install_Server-0098FF?style=flat-square&logo=visualstudiocode&logoColor=white)](https://vscode.dev/redirect/mcp/install?name=govuk&config=%7B%22type%22%3A%22http%22%2C%22url%22%3A%22https%3A%2F%2Fgovuk-mcp.fly.dev%2Fmcp%22%7D)
+[![Install in VS Code (local)](https://img.shields.io/badge/VS_Code-Install_Local-0098FF?style=flat-square&logo=visualstudiocode&logoColor=white)](https://vscode.dev/redirect/mcp/install?name=govuk&config=%7B%22command%22%3A%22uvx%22%2C%22args%22%3A%5B%22govuk-mcp%22%5D%7D)
 
 MCP server for GOV.UK — search, content retrieval, organisation lookup, and postcode resolution.
 
