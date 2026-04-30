@@ -3,7 +3,7 @@
 <!-- mcp-name: io.github.paulieb89/govuk-mcp -->
 
 [![PyPI](https://img.shields.io/pypi/v/govuk-mcp)](https://pypi.org/project/govuk-mcp/)
-[![govuk-mcp MCP server](https://glama.ai/mcp/servers/paulieb89/govuk-mcp/badges/card.svg)](https://glama.ai/mcp/servers/paulieb89/govuk-mcp)
+[![Glama](https://img.shields.io/badge/Glama-listed-orange?style=flat-square)](https://glama.ai/mcp/servers/paulieb89/govuk-mcp)
 [![smithery badge](https://smithery.ai/badge/bouch/govuk)](https://smithery.ai/servers/bouch/govuk)
 [![Install in VS Code](https://img.shields.io/badge/VS_Code-Install_Server-0098FF?style=flat-square&logo=visualstudiocode&logoColor=white)](https://vscode.dev/redirect/mcp/install?name=govuk&config=%7B%22type%22%3A%22http%22%2C%22url%22%3A%22https%3A%2F%2Fgovuk-mcp.fly.dev%2Fmcp%22%7D)
 [![Install in VS Code Insiders](https://img.shields.io/badge/VS_Code_Insiders-Install_Server-24bfa5?style=flat-square&logo=visualstudiocode&logoColor=white)](https://insiders.vscode.dev/redirect/mcp/install?name=govuk&config=%7B%22type%22%3A%22http%22%2C%22url%22%3A%22https%3A%2F%2Fgovuk-mcp.fly.dev%2Fmcp%22%7D&quality=insiders)
