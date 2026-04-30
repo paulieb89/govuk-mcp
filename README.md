@@ -35,11 +35,9 @@ For protocol-aware clients (Claude, Cursor, Inspector), the server also exposes 
 | `govuk://content/{base_path*}/links/{rel}` | Related content by link type |
 | `govuk://organisation/{slug}` | Organisation profile |
 
-## Quick start
+## Connect
 
-### Remote (no install)
-
-Point any MCP client at the hosted server:
+### Hosted (no install)
 
 ```json
 {
@@ -52,18 +50,18 @@ Point any MCP client at the hosted server:
 }
 ```
 
-### Local (pip install)
+### Local (uvx)
 
-```bash
-pip install govuk-mcp
-govuk-mcp
-# MCP endpoint: http://localhost:8000/mcp
-```
-
-### Local (Claude Desktop)
-
-```bash
-fastmcp install claude-desktop govuk-mcp
+```json
+{
+  "mcpServers": {
+    "govuk": {
+      "type": "stdio",
+      "command": "uvx",
+      "args": ["govuk-mcp"]
+    }
+  }
+}
 ```
 
 ## APIs used
