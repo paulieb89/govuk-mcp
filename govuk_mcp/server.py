@@ -499,7 +499,8 @@ mcp.add_middleware(ResponseCachingMiddleware(
 # ---------------------------------------------------------------------------
 
 def main():
-    mcp.run(transport="http", host="0.0.0.0", port=8000, stateless_http=True)
+    port = int(os.environ.get("PORT", "8080"))
+    mcp.run(transport="http", host="0.0.0.0", port=port, stateless_http=True)
 
 
 if __name__ == "__main__":
