@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+import functools
+import os
+import time
 from contextlib import asynccontextmanager
 from typing import Annotated, Any, Optional
 
@@ -13,7 +16,8 @@ from fastmcp.server.middleware.caching import (
     ResponseCachingMiddleware,
 )
 from pydantic import Field
-from starlette.responses import JSONResponse
+from prometheus_client import CONTENT_TYPE_LATEST, Counter as PromCounter, Histogram, generate_latest
+from starlette.responses import JSONResponse, Response
 
 from govuk_mcp.models import (
     GovukLocalAuthority,
@@ -40,6 +44,43 @@ LOCATIONS_BASE = "https://api.postcodes.io"  # public, no key required
 
 TIMEOUT = 15.0
 MAX_COUNT = 50
+
+TRANSPORT = os.getenv("FASTMCP_TRANSPORT", "http")
+REGION = os.getenv("FLY_REGION", "local")
+
+tool_calls_total = PromCounter(
+    "govuk_tool_calls_total",
+    "Count of MCP tool invocations.",
+    labelnames=["tool", "transport", "region", "status"],
+)
+tool_duration_seconds = Histogram(
+    "govuk_tool_duration_seconds",
+    "Tool invocation latency in seconds.",
+    labelnames=["tool", "transport", "region"],
+    buckets=(0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1.0, 2.5, 5.0, 10.0),
+)
+
+
+def _timed_tool(fn):
+    tool_name = fn.__name__
+
+    @functools.wraps(fn)
+    async def wrapped(*args, **kwargs):
+        t0 = time.perf_counter()
+        try:
+            result = await fn(*args, **kwargs)
+            tool_calls_total.labels(tool_name, TRANSPORT, REGION, "ok").inc()
+            return result
+        except BaseException:
+            tool_calls_total.labels(tool_name, TRANSPORT, REGION, "error").inc()
+            raise
+        finally:
+            tool_duration_seconds.labels(tool_name, TRANSPORT, REGION).observe(
+                time.perf_counter() - t0
+            )
+
+    return wrapped
+
 
 DOCUMENT_FORMATS = [
     "guide", "answer", "transaction", "smart_answer", "simple_smart_answer",
@@ -87,9 +128,14 @@ async def health(request):
     return JSONResponse({"status": "ok", "server": "govuk-mcp"})
 
 
+@mcp.custom_route("/metrics", methods=["GET"])
+async def metrics_endpoint(request):
+    return Response(generate_latest(), media_type=CONTENT_TYPE_LATEST)
+
+
 @mcp.custom_route("/.well-known/mcp/server-card.json", methods=["GET"])
 async def smithery_server_card(request):
-    return JSONResponse({"serverInfo": {"name": "govuk-mcp", "version": "0.2.1"}})
+    return JSONResponse({"serverInfo": {"name": "govuk-mcp", "version": "0.2.2"}})
 
 
 @mcp.custom_route("/.well-known/glama.json", methods=["GET"])
@@ -145,6 +191,7 @@ def _fmt_org(org: dict[str, Any]) -> GovukOrganisation:
         "openWorldHint": True,
     },
 )
+@_timed_tool
 async def govuk_search(
     query: Annotated[str, Field(description="Free-text search query, e.g. 'universal credit eligibility' or 'MOT check'", min_length=1, max_length=500)],
     ctx: Context,
@@ -236,6 +283,7 @@ async def govuk_search(
         "openWorldHint": True,
     },
 )
+@_timed_tool
 async def govuk_grep_content(
     base_path: Annotated[str, Field(description="GOV.UK base_path, e.g. '/guidance/register-for-vat' or '/universal-credit'", min_length=1, max_length=500)],
     pattern: Annotated[str, Field(description="Regex or literal substring to search for within the page body, e.g. 'payment' or 'eligible.*income'", min_length=1, max_length=200)],
@@ -285,6 +333,7 @@ async def govuk_grep_content(
         "openWorldHint": True,
     },
 )
+@_timed_tool
 async def govuk_list_organisations(
     ctx: Context,
     page: Annotated[int, Field(description="Page number (1-based)", ge=1)] = 1,
@@ -338,6 +387,7 @@ async def govuk_list_organisations(
         "openWorldHint": True,
     },
 )
+@_timed_tool
 async def govuk_lookup_postcode(
     postcode: Annotated[str, Field(description="UK postcode, e.g. 'SW1A 2AA' or 'NG1 1AA'. Spaces optional.", min_length=5, max_length=8)],
     ctx: Context,
@@ -389,6 +439,7 @@ async def govuk_lookup_postcode(
         "openWorldHint": True,
     },
 )
+@_timed_tool
 async def govuk_get_content(
     base_path: Annotated[str, Field(description="GOV.UK base_path, e.g. '/universal-credit' or 'universal-credit'", min_length=1, max_length=500)],
     ctx: Context,
@@ -425,6 +476,7 @@ async def govuk_get_content(
         "openWorldHint": True,
     },
 )
+@_timed_tool
 async def govuk_get_section(
     base_path: Annotated[str, Field(description="GOV.UK base_path, e.g. '/universal-credit'", min_length=1, max_length=500)],
     anchor: Annotated[str, Field(description="Section anchor ID from govuk_get_content sections list", min_length=1, max_length=200)],
@@ -460,6 +512,7 @@ async def govuk_get_section(
         "openWorldHint": True,
     },
 )
+@_timed_tool
 async def govuk_get_organisation(
     slug: Annotated[str, Field(description="Organisation slug, e.g. 'hm-revenue-customs'. Find slugs via govuk_list_organisations.", min_length=1, max_length=200)],
     ctx: Context,
