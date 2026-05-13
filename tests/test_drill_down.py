@@ -139,6 +139,24 @@ def test_grep_body_falls_back_to_literal_on_invalid_regex():
 
 
 @pytest.mark.asyncio
+async def test_govuk_content_details_rejects_body_field():
+    """The /details/{field} resource must refuse field='body' — that path
+    bypasses the drill-down design and resurrects the 270k-token blowout
+    pattern the resources module exists to prevent. Callers should be
+    redirected to /index + /section/{anchor} or govuk_grep_content."""
+    async with Client(mcp) as c:
+        with pytest.raises(Exception) as exc_info:
+            await c.read_resource(
+                "govuk://content/guidance/planning-guidance-letters-to-chief-planning-officers/details/body"
+            )
+    message = str(exc_info.value).lower()
+    assert "body" in message
+    # The error should point at the navigable alternatives so the model can
+    # self-correct without a round-trip to the user.
+    assert "section" in message or "index" in message or "grep" in message
+
+
+@pytest.mark.asyncio
 async def test_six_resource_templates_registered():
     async with Client(mcp) as c:
         templates = {t.uriTemplate for t in await c.list_resource_templates()}

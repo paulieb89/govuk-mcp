@@ -85,16 +85,32 @@ def register_govuk_resources(mcp: FastMCP) -> None:
         description=(
             "A specific field from the content item's `details` blob, e.g. "
             "'attachments', 'change_history', 'headers', 'tags'. Schema-"
-            "dependent. Use 'body' field with caution — can be very large; "
-            "prefer /index + /section/{anchor} for navigable body access."
+            "dependent. The 'body' field is NOT served here — it can be "
+            "270k+ tokens on guidance pages. Use /index + /section/{anchor} "
+            "for navigable body access, or the govuk_grep_content tool for "
+            "pattern search."
         ),
         mime_type="application/json",
         annotations={"readOnlyHint": True, "idempotentHint": True},
         tags={"govuk", "content", "details"},
     )
     async def govuk_content_details(base_path: str, field: str, ctx: Context) -> str:
+        # The 'body' field is the entire rendered HTML of the content item.
+        # Returning it via /details/{field} bypasses the drill-down design
+        # this module exists to enforce. The original govuk_get_content tool
+        # was deleted for exactly this reason (the 270k-token incident).
+        # Force callers down the navigable path.
+        if field == "body":
+            raise ValueError(
+                "The 'body' field is not served via /details/{field} because "
+                "it can be 270k+ tokens on guidance pages. Use "
+                "govuk://content/{base_path}/index to discover sections, "
+                "then govuk://content/{base_path}/section/{anchor} to read "
+                "one section at a time. For pattern search across the body, "
+                "use the govuk_grep_content tool."
+            )
         value = parsers.extract_details_field(await _fetch_content(base_path, ctx), field)
-        # `details.body` is a string already (HTML); other fields are JSON.
+        # Non-body fields are JSON-serialised.
         return value if isinstance(value, str) else json.dumps(value)
 
     @mcp.resource(
