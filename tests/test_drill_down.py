@@ -173,25 +173,22 @@ async def test_six_resource_templates_registered():
 
 
 @pytest.mark.asyncio
-async def test_grep_tool_registered_and_old_tools_gone():
+async def test_seven_tools_registered():
     async with Client(mcp) as c:
         tools = {t.name for t in await c.list_tools()}
-    assert "govuk_grep_content" in tools
-    # Deleted tools
-    assert "govuk_get_content" not in tools
-    assert "govuk_get_organisation" not in tools
-    # Kept
+    # Core search and grep
     assert "govuk_search" in tools
+    assert "govuk_grep_content" in tools
+    # Companion tools for tool-only clients (ChatGPT, proxy bridge)
+    assert "govuk_get_content" in tools
+    assert "govuk_get_section" in tools
+    assert "govuk_get_organisation" in tools
+    # Discovery and postcode
     assert "govuk_list_organisations" in tools
     assert "govuk_lookup_postcode" in tools
-
-
-@pytest.mark.asyncio
-async def test_resources_as_tools_transform_exposes_read_resource_tool():
-    async with Client(mcp) as c:
-        tools = {t.name for t in await c.list_tools()}
-    assert "read_resource" in tools
-    assert "list_resources" in tools
+    # ResourcesAsTools is intentionally not used — no read_resource/list_resources
+    assert "read_resource" not in tools
+    assert "list_resources" not in tools
 
 
 @pytest.mark.asyncio
@@ -224,11 +221,11 @@ async def test_grep_content_tool_returns_hits_live():
     async with Client(mcp) as c:
         result = await c.call_tool(
             "govuk_grep_content",
-            {"params": {
+            {
                 "base_path": "guidance/planning-guidance-letters-to-chief-planning-officers",
                 "pattern": "consultation",
                 "max_hits": 5,
-            }},
+            },
         )
     payload = result.data
     assert payload.base_path
@@ -245,7 +242,7 @@ async def test_typical_workflow_under_8k_tokens_live():
         header = await c.read_resource(f"govuk://content/{base}/header")
         grep = await c.call_tool(
             "govuk_grep_content",
-            {"params": {"base_path": base, "pattern": "consultation", "max_hits": 5}},
+            {"base_path": base, "pattern": "consultation", "max_hits": 5},
         )
         sections = []
         for hit in grep.data.hits[:2]:

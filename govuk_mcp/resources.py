@@ -133,7 +133,8 @@ def register_govuk_resources(mcp: FastMCP) -> None:
         name="GOV.UK organisation",
         description=(
             "Organisation profile by slug, e.g. 'hm-revenue-customs'. "
-            "Replaces the deleted govuk_get_organisation tool."
+            "Companion resource for protocol-aware clients; "
+            "tool-only clients use govuk_get_organisation instead."
         ),
         mime_type="application/json",
         annotations={"readOnlyHint": True, "idempotentHint": True},
