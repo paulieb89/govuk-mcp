@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import functools
+import logging
 import os
 import time
 from contextlib import asynccontextmanager
@@ -10,6 +11,7 @@ from typing import Annotated, Any, Optional
 
 import httpx
 from fastmcp import Context, FastMCP
+from fastmcp.server.middleware import Middleware, MiddlewareContext
 from fastmcp.server.middleware.caching import (
     CallToolSettings,
     ReadResourceSettings,
@@ -59,6 +61,38 @@ tool_duration_seconds = Histogram(
     labelnames=["tool", "transport", "region"],
     buckets=(0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1.0, 2.5, 5.0, 10.0),
 )
+client_connections_total = PromCounter(
+    "govuk_client_connections_total",
+    "Count of MCP client initialize handshakes.",
+    labelnames=["client_name", "client_version", "transport", "region"],
+)
+
+_log = logging.getLogger("fastmcp.govuk_mcp.clients")
+
+
+class ClientTrackingMiddleware(Middleware):
+    """Log clientInfo and increment connection counter on every initialize.
+
+    Ported from uk-legal-mcp, the one server in the fleet that could answer "who
+    actually uses this?" — and whose answer (147 distinct clients, incl. registry
+    crawlers and third-party tooling) is why this is worth having everywhere. This
+    server is open and unauthenticated, so the handshake's clientInfo is the only
+    identity a caller offers; without it, BOUCH's own agents cannot be told apart
+    from real users. Counts handshakes, not tool calls — a client label on
+    tool_calls_total would multiply cardinality by every client ever seen.
+    """
+
+    async def on_request(self, context: MiddlewareContext, call_next):
+        result = await call_next(context)
+        if context.method == "initialize":
+            params = context.message.params
+            info = getattr(params, "clientInfo", None)
+            client_name = getattr(info, "name", "unknown") or "unknown"
+            client_version = getattr(info, "version", "unknown") or "unknown"
+            _log.info("client_connected client=%s version=%s transport=%s region=%s",
+                      client_name, client_version, TRANSPORT, REGION)
+            client_connections_total.labels(client_name, client_version, TRANSPORT, REGION).inc()
+        return result
 
 
 def _timed_tool(fn):
@@ -541,6 +575,7 @@ register_govuk_resources(mcp)
 # Response caching for resources/read AND tools/call. Every surface here is
 # read-only/idempotent, GOV.UK content is stable enough that 1h is the right
 # TTL. In-memory only (single Fly machine).
+mcp.add_middleware(ClientTrackingMiddleware())
 mcp.add_middleware(ResponseCachingMiddleware(
     read_resource_settings=ReadResourceSettings(ttl=3600),
     call_tool_settings=CallToolSettings(ttl=3600),
