@@ -41,7 +41,31 @@ For protocol-aware clients (Claude, Cursor, Inspector), the server also exposes 
 
 ## Connect
 
-### Hosted (no install)
+Hosted endpoint — no install, no API key:
+
+```text
+https://govuk-mcp.fly.dev/mcp
+```
+
+### Claude (web, desktop and mobile)
+
+1. Open **Customize → Connectors** ([claude.ai/customize/connectors](https://claude.ai/customize/connectors)).
+2. Click **Add custom connector**.
+3. Name it `govuk`, paste the URL above and click **Add**. No sign-in is needed.
+
+That's it — no config file to edit and no restart. Add the connector on web or desktop, and it's then available on your account, including the mobile apps. Turn it on or off per chat from the **+** menu → **Connectors**. On Team and Enterprise plans an Owner adds it once under **Organization settings → Connectors**; Free plans can add one custom connector.
+
+### Claude Code
+
+If you've added the connector above, Claude Code lists it under `/mcp` — but only when Claude Code is signed in with your claude.ai subscription login, not an API key. Otherwise, add it directly:
+
+```bash
+claude mcp add --transport http --scope user govuk https://govuk-mcp.fly.dev/mcp
+```
+
+### Other clients
+
+VS Code and Cursor: use the install badges at the top of this page. For clients configured with `mcpServers` JSON:
 
 ```json
 {
@@ -54,19 +78,31 @@ For protocol-aware clients (Claude, Cursor, Inspector), the server also exposes 
 }
 ```
 
-### Local (uvx)
+### Run it locally (stdio)
+
+Claude Code:
+
+```bash
+claude mcp add --scope user govuk -- uvx govuk-mcp
+```
+
+<details>
+<summary>Claude Desktop and other <code>mcpServers</code> clients</summary>
+
+Claude Desktop runs local servers either as a packaged desktop extension (`.mcpb`, installed from **Settings → Extensions**) or from `claude_desktop_config.json`. There's no `.mcpb` for this server yet, so for local mode add this to the config file (**Settings → Developer → Edit Config**) and restart the app. For everyday use the hosted connector above is simpler.
 
 ```json
 {
   "mcpServers": {
     "govuk": {
-      "type": "stdio",
       "command": "uvx",
       "args": ["govuk-mcp"]
     }
   }
 }
 ```
+
+</details>
 
 ## APIs used
 
