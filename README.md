@@ -8,7 +8,6 @@
 [![Install in VS Code](https://img.shields.io/badge/VS_Code-Install_Server-0098FF?style=flat-square&logo=visualstudiocode&logoColor=white)](https://vscode.dev/redirect/mcp/install?name=govuk&config=%7B%22type%22%3A%22http%22%2C%22url%22%3A%22https%3A%2F%2Fgovuk-mcp.fly.dev%2Fmcp%22%7D)
 [![Install in VS Code Insiders](https://img.shields.io/badge/VS_Code_Insiders-Install_Server-24bfa5?style=flat-square&logo=visualstudiocode&logoColor=white)](https://insiders.vscode.dev/redirect/mcp/install?name=govuk&config=%7B%22type%22%3A%22http%22%2C%22url%22%3A%22https%3A%2F%2Fgovuk-mcp.fly.dev%2Fmcp%22%7D&quality=insiders)
 [![Install in Cursor](https://img.shields.io/badge/Cursor-Install_Server-000000?style=flat-square&logoColor=white)](https://cursor.com/en/install-mcp?name=govuk&config=eyJ0eXBlIjoiaHR0cCIsInVybCI6Imh0dHBzOi8vZ292dWstbWNwLmZseS5kZXYvbWNwIn0=)
-[![Install in VS Code (local)](https://img.shields.io/badge/VS_Code-Install_Local-0098FF?style=flat-square&logo=visualstudiocode&logoColor=white)](https://vscode.dev/redirect/mcp/install?name=govuk&config=%7B%22command%22%3A%22uvx%22%2C%22args%22%3A%5B%22govuk-mcp%22%5D%7D)
 
 MCP server for GOV.UK — search, content retrieval, organisation lookup, and postcode resolution.
 
@@ -80,29 +79,7 @@ VS Code and Cursor: use the install badges at the top of this page. For clients 
 
 ### Run it locally (stdio)
 
-Claude Code:
-
-```bash
-claude mcp add --scope user govuk -- uvx govuk-mcp
-```
-
-<details>
-<summary>Claude Desktop and other <code>mcpServers</code> clients</summary>
-
-Claude Desktop runs local servers either as a packaged desktop extension (`.mcpb`, installed from **Settings → Extensions**) or from `claude_desktop_config.json`. There's no `.mcpb` for this server yet, so for local mode add this to the config file (**Settings → Developer → Edit Config**) and restart the app. For everyday use the hosted connector above is simpler.
-
-```json
-{
-  "mcpServers": {
-    "govuk": {
-      "command": "uvx",
-      "args": ["govuk-mcp"]
-    }
-  }
-}
-```
-
-</details>
+Local stdio mode isn't supported yet ([#8](https://github.com/paulieb89/govuk-mcp/issues/8)); use the hosted endpoint.
 
 ## APIs used
 
