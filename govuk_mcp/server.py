@@ -91,7 +91,7 @@ async def health(request):
 
 @mcp.custom_route("/.well-known/mcp/server-card.json", methods=["GET"])
 async def smithery_server_card(request):
-    return JSONResponse({"serverInfo": {"name": "govuk-mcp", "version": "0.3.1"}})
+    return JSONResponse({"serverInfo": {"name": "govuk-mcp", "version": "0.3.2"}})
 
 
 @mcp.custom_route("/.well-known/glama.json", methods=["GET"])
