@@ -1,5 +1,7 @@
 # govuk-mcp
 
+Maintained by BOUCH — private hosting, custom tools and setup: paul@bouch.dev · [bouch.dev/products/govuk-mcp](https://bouch.dev/products/govuk-mcp)
+
 <!-- mcp-name: io.github.paulieb89/govuk-mcp -->
 
 [![PyPI](https://img.shields.io/pypi/v/govuk-mcp)](https://pypi.org/project/govuk-mcp/)
